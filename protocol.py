@@ -3,6 +3,13 @@
 from config import *
 from devices import *
 
+
+# TODO (STILL UNFINISHED): transport and network layer receiver side,
+#   RDTSender class encapsulate function
+#   transport layer checksum implementation,
+#   data link layer
+
+
 class UDPHeader:
     def __init__(self, source_port, dest_port, data_length, segment_type, sequence_number, payload, checksum=None):
         self.source_port = source_port
@@ -28,6 +35,10 @@ class IPPacket:
         self.protocol = protocol  # should be 17 (indicates UDP payload)
         self.packet_length = packet_length  # IP packer header + UDP segment from transport layer
         self.payload = payload  # UDP segment
+
+class EthernetFrame:
+    def __init__(self):
+        pass
 
 
 # layer 4 (transport layer) classes
@@ -173,4 +184,20 @@ class NetworkLayer:
         # if destination IP matches device's own IP, identify packet as local delivery
         # else transmit()
         # check TTL: if ttl reached 0 at a router, packet is dropped
+        pass
+
+class DataLinkLayer:
+    def __init__(self):
+        pass
+
+    def layer_transmission(self):
+        pass
+
+    def encapsulation(self):
+        pass
+
+    def forward(self):
+        pass
+
+    def transmit_to_physical(self):
         pass
