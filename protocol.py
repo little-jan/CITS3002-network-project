@@ -1,15 +1,12 @@
-# header classes
 # TODO: confirm these imports are needed
 from config import *
 from devices import *
 
 
-# TODO (STILL UNFINISHED): transport and network layer receiver side,
-#   RDTSender class encapsulate function
-#   transport layer checksum implementation,
-#   data link layer
+# TODO (STILL UNFINISHED):
+#   transport layer checksum implementation
 
-
+# header classes
 class UDPHeader:
     def __init__(self, source_port, dest_port, data_length, segment_type, sequence_number, payload, checksum=None):
         self.source_port = source_port
@@ -24,7 +21,7 @@ class UDPHeader:
         else:
             self.checksum = checksum
 
-    def _generate_checksum(self):
+    def _generate_checksum(self):  # TODO: how to generate a checksum
         pass
 
 class IPPacket:
@@ -37,8 +34,11 @@ class IPPacket:
         self.payload = payload  # UDP segment
 
 class EthernetFrame:
-    def __init__(self):
-        pass
+    def __init__(self, dest_mac, source_mac, frame_type, payload):
+        self.dest_mac = dest_mac
+        self.source_mac = source_mac
+        self.frame_type = frame_type
+        self.payload = payload
 
 
 # layer 4 (transport layer) classes
@@ -89,32 +89,93 @@ class RDTSender:
         print(f"{host_name}: Layer 4: Segment sent to Network Layer\n")
         self.network_channel.layer_transmission(packet, dest_ip, source_ip, host_name)
 
-    def ack_verification(self, feedback):  # this should verify the ACK received from the receiver side
+    def receive(self, segment, sender_ip=None):
+        print(f"{self.host_name}: Layer 4: Segment received from Network Layer")
+
+        if self.checksum_verification(segment):
+            print(f"{self.host_name}: Layer 4: Checksum verified")
+
+            if segment.segment_type == 1:
+                self.ack_verification(segment)
+
+    def checksum_verification(self, segment):  # TODO: checksum
         pass
+
+    def ack_verification(self, feedback_segment):
+        print(f"{self.host_name}: Layer 4: ACK received: seq={feedback_segment.sequence_number}\n")
+
+        if feedback_segment.sequence_number == self.sequence_number:
+            self.current_state = 0
+            self.sequence_number = 1 - self.sequence_number
+        else:
+            print(f"{self.host_name}: Layer 4: Duplicate/Invalid ACK. Retransmitting...")
+            self.retransmission(self.last_packet_sent)
 
     def retransmission(self, packet):
-        pass
+        print(f"{self.host_name}: Layer 4: Retransmitting segment...")
+        self.send(packet, self.source_ip, self.dest_ip, self.host_name)
 
 class RDTReceiver:
-    def __init__(self):
+    def __init__(self, host_name, network_layer, source_ip=None):
+        self.host_name = host_name
+        self.network_layer = network_layer
+        self.source_ip = source_ip
+        self.expected_sequence_number = 0
+
+    def receive(self, segment, sender_ip):
+        print(f"{self.host_name}: Layer 4: Segment received from Network Layer")
+
+        if self.checksum_verification(segment):
+            print(f"{self.host_name}: Layer 4: Checksum verified")
+
+            if segment.segment_type == 0:
+                if self.sequence_verification(segment):
+                    app_data = self.decapsulation(segment)
+                    data_size = segment.segment_length - 10
+                    print(f"{self.host_name}: Layer 4: DATA segment delivered to Application Layer. Data size={data_size}")
+                    self.expected_sequence_number = 1 - self.expected_sequence_number
+                else:
+                    print(f"{self.host_name}: Layer 4: Duplicate packet (seq={segment.sequence_number}). Dropping data.")
+                self.extract_data(segment)
+                self.generate_ack(segment, sender_ip)
+
+                self.generate_ack(segment, sender_ip)
+
+    def sequence_verification(self, segment):
+        if segment.sequence_number == self.expected_sequence_number:
+            return True
+        else:
+            return False
+
+    def decapsulation(self, segment):
+        return segment.payload
+
+    def checksum_verification(self, packet):  # TODO: verify checksum
         pass
 
-    def decapsulation(self, packet):
-        # strips away IP packet headers
-        pass
+    def extract_data(self, segment):
+        data_size = segment.segment_length - 10
+        print(f"{self.host_name}: Layer 4: DATA segment delivered to Application Layer. Data size={data_size}")
+        return segment.payload
 
-    def sequence_verification(self, packet):
-        pass
+    def generate_ack(self, received_segment, dest_ip):
+        print(
+            f"{self.host_name}: Layer 4: Segment created by adding transport layer header (ACK, seq={received_segment.sequence_number})")
+        print(f"{self.host_name}: Layer 4: Segment sent to Network Layer\n")
 
-    def checksum_verification(self, packet):
-        pass
+        ack_segment = UDPHeader(
+            source_port=received_segment.dest_port,
+            dest_port=received_segment.source_port,
+            data_length=0,
+            segment_type=1,
+            sequence_number=received_segment.sequence_number,
+            payload=None
+        )
 
-    def extract_data(self, packet):
-        pass
+        if self.network_layer:
+            self.network_layer.layer_transmission(ack_segment, dest_ip, self.source_ip, self.host_name)
 
-    def generate_ack(self):
-        pass
-
+# layer 3 (network layer) class(es)
 class NetworkLayer:
     def __init__(self, source_ip=None, host_name=None, dest_ip=None, payload=None, routing_table_data=None):
         self.source_ip = source_ip
@@ -124,6 +185,7 @@ class NetworkLayer:
         self.ttl_value = None
         self.routing_table_data = routing_table_data
         self.data_link_layer = None  # TODO: implement this in devices.py
+        self.transport_layer = None
 
     def layer_transmission(self, udp_segment, dest_ip, source_ip, host_name):
         # convert transport layer segment to something that can be sent on network layer
@@ -184,20 +246,76 @@ class NetworkLayer:
         # if destination IP matches device's own IP, identify packet as local delivery
         # else transmit()
         # check TTL: if ttl reached 0 at a router, packet is dropped
-        pass
+        print(f"{self.host_name}: Layer 3: Packet received from Data Link Layer: SRC_IP={packet.source_ip}, DST_IP={packet.dest_ip}, TTL={packet.ttl}")
+        print(f"{self.host_name}: Layer 3: Destination IP read: {packet.dest_ip}")
 
+        if "Router" in self.host_name:
+            if self.ttl(packet):
+                route_next_hop, interface = self.routing_table(packet.dest_ip)
+                actual_next_hop = self.next_hop_determination(packet.dest_ip, route_next_hop)
+
+                print(f"{self.host_name}: Layer 3: Next-hop IP determined: {actual_next_hop}")
+                print(f"{self.host_name}: Layer 3: Outgoing interface selected (Interface {interface})")
+                print(f"{self.host_name}: Layer 3: Packet forwarded to Data Link Layer")
+
+                self.transmit(packet, actual_next_hop, interface)
+        elif packet.dest_ip == self.source_ip:
+            print(f"{self.host_name}: Layer 3: Packet identified as local delivery")
+            print(f"{self.host_name}: Layer 3: Segment delivered to Transport Layer")
+
+            if self.transport_layer:
+                self.transport_layer.receive(packet.payload, packet.source_ip)
+            else:
+                print(f"{self.host_name}: Layer 3: ERROR - No Transport Layer connected.")
+        else:
+            print(f"{self.host_name}: Layer 3: Packet dropped. Not a router and destination IP does not match.")
+
+# layer 2 (data link layer) class(es)
 class DataLinkLayer:
-    def __init__(self):
-        pass
+    def __init__(self, mac_address, host_name, arp_table=None):
+        self.mac_address = mac_address
+        self.host_name = host_name
+        self.arp_table = arp_table if arp_table is not None else {}
+        self.network_layer = None
+        self.mac_learning_table = {}
+        self.connected_devices = {}
 
-    def layer_transmission(self):
-        pass
+    def layer_transmission(self, packet, next_hop_ip, interface):
+        print(f"{self.host_name}: Layer 2: Packet received from Network Layer")
 
-    def encapsulation(self):
-        pass
+        dest_mac = self.mac_addressing(next_hop_ip)
+        print(f"{self.host_name}: Layer 2: Destination MAC lookup for next-hop IP ({next_hop_ip}) → {dest_mac}")
 
-    def forward(self):
-        pass
+        frame_type = "0x0800"
+        current_frame = self.encapsulation(dest_mac, self.mac_address, frame_type, packet)
+        print(f"{self.host_name}: Layer 2: Frame created: SRC_MAC={self.mac_address}, DST_MAC={dest_mac}")
 
-    def transmit_to_physical(self):
-        pass
+        if "Router" in self.host_name:
+            print(f"{self.host_name}: Layer 2: Frame forwarded on Interface {interface}")
+        else:
+            print(f"{self.host_name}: Layer 2: Frame sent")
+
+        if interface in self.connected_devices:
+            next_device_layer2 = self.connected_devices[interface]
+            next_device_layer2.receive_from_physical(current_frame, interface)
+        else:
+            print(f"{self.host_name}: Layer 2: DROP - Nothing connected to Interface {interface}")
+
+
+    def mac_addressing(self, next_hop_ip):
+        return self.arp_table.get(next_hop_ip, "FF:FF:FF:FF:FF:FF")
+
+    def encapsulation(self, dest_mac, source_mac, frame_type, payload):
+        return EthernetFrame(dest_mac, source_mac, frame_type, payload)
+
+    def receive_from_physical(self, frame, interface=None):
+        if interface and "Router" in self.host_name:
+            print(f"{self.host_name}: Layer 2: Frame received on Interface {interface}")
+            print(f"{self.host_name}: Layer 2: Source MAC learned: {frame.source_mac} on Interface {interface}")
+        else:
+            print(f"{self.host_name}: Layer 2: Frame received")
+            print(f"{self.host_name}: Layer 2: Source MAC learned: {frame.source_mac}")
+        self.mac_learning_table[frame.source_mac] = interface
+        print(f"{self.host_name}: Layer 2: Packet delivered to Network Layer")
+        if self.network_layer:
+            self.network_layer.receive(frame.payload)
